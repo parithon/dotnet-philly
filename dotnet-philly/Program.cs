@@ -7,6 +7,7 @@ using McMaster.Extensions.CommandLineUtils;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using DotNetSamples.Core;
+using System.Net.Sockets;
 
 namespace dotnet_philly
 {
@@ -17,7 +18,6 @@ namespace dotnet_philly
 		internal static readonly Uri Registry = new Uri("https://localhost:5001/Samples");
 
         private readonly ILogger _logger;
-
 
 		public static int Main(string[] args) => CommandLineApplication.Execute<Program>(args);
 
@@ -69,14 +69,28 @@ namespace dotnet_philly
             }
             catch (HttpRequestException ex)
             {
-                _logger.LogError($"Could not download sample '{Name}'. {ex.Message}");
+				var errorMessage = $"Could not download sample '{name}'. {ex.Message}.";
+				WriteError(errorMessage);
+                _logger.LogError($"{errorMessage}\n{ex.StackTrace}");
                 return;
             }
 
 			var sample = JsonConvert.DeserializeObject<Sample>(sampleData);
 			var destinationFolder = OutputFolder ?? sample.Name;
 
-			var zipFile = await client.GetStreamAsync(sample.Url);
+			Stream zipFile;
+			try
+			{
+				zipFile = await client.GetStreamAsync(sample.Url);
+			}
+			catch (HttpRequestException ex)
+			{
+				var errorMessage = $"Could not download sample '{name}'. {ex.Message}.";
+				WriteError(errorMessage);
+				_logger.LogError($"{errorMessage}\n{ex.StackTrace}");
+				return;
+			}
+
 			using (var zipArchive = new ZipArchive(zipFile))
 			{
 				try
@@ -85,7 +99,9 @@ namespace dotnet_philly
 				}
 				catch(Exception exception)
 				{
-					Console.WriteLine($"An error occured while attempting to extract the {sample.Name} sample.\n{exception.Message}");
+					var errorMessage = $"An error occured while attempting to extract the {sample.Name} sample.\n{exception.Message}";
+					WriteError(errorMessage);
+					_logger.LogError($"{errorMessage}\n{exception.StackTrace}");
 				}
 			}
 		}
@@ -99,11 +115,10 @@ namespace dotnet_philly
             }
             catch (HttpRequestException ex)
             {
-                var color = Console.ForegroundColor;
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"Could not retrieve samples from {Registry}.\n\r{ex.Message}");
-                Console.ForegroundColor = color;
-                return;
+				var errorMessage = $"Could not retrieve samples from {Registry}. {ex.Message}";
+                WriteError(errorMessage);
+				_logger.LogError($"{errorMessage}\n\n{ex.StackTrace}");
+				return;
             }
 
             Console.WriteLine($"The available samples from {Registry}");
@@ -121,6 +136,14 @@ namespace dotnet_philly
 			}
 
 			Console.WriteLine($"\nTotal samples found: {samplesArray.Length}");
+		}
+
+		private void WriteError(string message)
+		{
+			var foregroundColor = Console.ForegroundColor;
+			Console.ForegroundColor = ConsoleColor.Red;
+			Console.WriteLine(message);
+			Console.ForegroundColor = foregroundColor;
 		}
 	}
 }
