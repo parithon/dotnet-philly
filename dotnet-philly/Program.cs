@@ -29,21 +29,27 @@ namespace dotnet_philly
                     .CreateLogger<Program>();
         }
 
-		[Argument(0, Description = "Name of the sample project to fetch")]
+		[Argument(0, Description = "Name of the sample project to fetch.")]
 		public string Name { get; }
 
-		[Argument(1, Description ="Folder to write the sample to.  If not specified, then the name of the sample as a child of the current directory")]
+		[Option("-f|--folder <FOLDER>", Description ="Folder to write the sample to.")]
 		public string OutputFolder { get; }
 
-		//[Option(Description = "An optional parameter, with a default value.\nThe number of times to say hello.")]
-		//[Range(1, 1000)]
-		//public int Count { get; } = 1;
+		[Option(Description="Show a sample project's details.")]
+		public bool Details {get;}
 
-		private async Task<int> OnExecute()
+		private async Task<int> OnExecute(CommandLineApplication app)
 		{
 			using (var client = new HttpClient{ BaseAddress = Registry })
 			{
-				if (string.IsNullOrEmpty(Name))
+				 
+				if (Details)
+				{
+					_logger.LogInformation($"Retrieving sample '{Name}' from '{Registry}'");
+					await OutputSampleDetails(Name, client);
+					return 1;
+				}
+				else if (string.IsNullOrEmpty(Name))
 				{
                     _logger.LogInformation($"Retrieving samples from '{Registry}'");
 					await OutputAvailableSamples(client);
@@ -61,21 +67,11 @@ namespace dotnet_philly
 		private async Task DownloadProject(string name, HttpClient client)
 		{
 
-            var sampleData = string.Empty;
+            var sample = await GetSampleAsync(name, client);
 
-            try
-            {
-                sampleData = await client.GetStringAsync("Samples/" + name);
-            }
-            catch (HttpRequestException ex)
-            {
-				var errorMessage = $"Could not download sample '{name}'. {ex.Message}.";
-				WriteError(errorMessage);
-                _logger.LogError($"{errorMessage}\n{ex.StackTrace}");
-                return;
-            }
-
-			var sample = JsonConvert.DeserializeObject<Sample>(sampleData);
+			if (sample == null)
+				return;
+				
 			var destinationFolder = OutputFolder ?? sample.Name;
 
 			Stream zipFile;
@@ -136,6 +132,38 @@ namespace dotnet_philly
 			}
 
 			Console.WriteLine($"\nTotal samples found: {samplesArray.Length}");
+		}
+
+		private async Task OutputSampleDetails(string name, HttpClient client)
+		{
+			var sample = await GetSampleAsync(name, client);
+
+			if (sample == null)
+				return;
+
+			var lineFormat = "{0,-10} {1}";
+			Console.WriteLine(lineFormat, "Name:", sample.Name);
+			Console.WriteLine(lineFormat, "Command:", sample.Command);
+			Console.WriteLine(lineFormat, "Url:", sample.Url);
+			Console.WriteLine(lineFormat, "Details:", sample.Description);
+		}
+
+		private async Task<Sample> GetSampleAsync(string name, HttpClient client)
+		{
+			var sampleData = string.Empty;
+			try
+			{
+				sampleData = await client.GetStringAsync("Samples/" + name);
+			}
+			catch (HttpRequestException ex)
+			{
+				var errorMessage = $"Could not retrieve sample {name}. {ex.Message}";
+				WriteError(errorMessage);
+				_logger.LogError($"{errorMessage}\n{ex.StackTrace}");
+				return null;
+			}
+
+			return JsonConvert.DeserializeObject<Sample>(sampleData);
 		}
 
 		private void WriteError(string message)
